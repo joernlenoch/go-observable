@@ -6,7 +6,13 @@ import (
 
 type Listener func(interface{})
 
-type Observable struct {
+type Observable interface {
+	Subscribe(l Listener)
+	Next(event interface{})
+	Close()
+}
+
+type observable struct {
 	quit      chan bool
 	events    chan interface{}
 	listeners []Listener
@@ -14,7 +20,7 @@ type Observable struct {
 	Verbose   bool
 }
 
-func (o *Observable) Open() {
+func (o *observable) Open() {
 	// Check for mutex
 	if o.mutex == nil {
 		o.mutex = &sync.Mutex{}
@@ -33,7 +39,7 @@ func (o *Observable) Open() {
 
 // Close the observer channles,
 // it will return an error if close fails.
-func (o *Observable) Close() error {
+func (o *observable) Close() {
 	// Close event eventLoop
 	if o.events != nil {
 		// Send a quit signal.
@@ -43,11 +49,9 @@ func (o *Observable) Close() error {
 		close(o.quit)
 		close(o.events)
 	}
-
-	return nil
 }
 
-func (o *Observable) Subscribe(l Listener) {
+func (o *observable) Subscribe(l Listener) {
 
 	if o.mutex == nil {
 		o.mutex = &sync.Mutex{}
@@ -59,15 +63,11 @@ func (o *Observable) Subscribe(l Listener) {
 	o.listeners = append(o.listeners, l)
 }
 
-func (o *Observable) Next(event interface{}) {
+func (o *observable) Next(event interface{}) {
 	o.events <- event
 }
 
-func (o *Observable) Emit(event interface{}) {
-	o.Next(event)
-}
-
-func (o *Observable) eventLoop() {
+func (o *observable) eventLoop() {
 	for {
 		select {
 		case event := <-o.events:
@@ -79,7 +79,7 @@ func (o *Observable) eventLoop() {
 }
 
 // handleEvent sends an event to all listeners
-func (o *Observable) handleEvent(event interface{}) {
+func (o *observable) handleEvent(event interface{}) {
 	o.mutex.Lock()
 	defer o.mutex.Unlock()
 
@@ -88,9 +88,11 @@ func (o *Observable) handleEvent(event interface{}) {
 	}
 }
 
+var _ Observable = (*observable)(nil)
+
 // NewObservable creates a new observable
-func New() *Observable {
-	obs := Observable{}
+func New() Observable {
+	obs := &observable{}
 	obs.Open()
-	return &obs
+	return obs
 }
