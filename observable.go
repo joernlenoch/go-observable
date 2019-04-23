@@ -2,17 +2,16 @@ package observable
 
 import (
 	"sync"
-	"time"
 )
 
 type Listener func(interface{})
 
 type Observable struct {
-	quit           chan bool
-	events         chan interface{}
-	listeners      []Listener
-	mutex          *sync.Mutex
-	Verbose        bool
+	quit      chan bool
+	events    chan interface{}
+	listeners []Listener
+	mutex     *sync.Mutex
+	Verbose   bool
 }
 
 func (o *Observable) Open() {
@@ -25,18 +24,17 @@ func (o *Observable) Open() {
 		return
 	}
 
-	// Create the observer channels.
 	o.quit = make(chan bool)
 	o.events = make(chan interface{})
 
-	// Run the observer.
-	o.eventLoop()
+	// Start the event eventLoop
+	go o.eventLoop()
 }
 
 // Close the observer channles,
 // it will return an error if close fails.
 func (o *Observable) Close() error {
-	// Close event loop
+	// Close event eventLoop
 	if o.events != nil {
 		// Send a quit signal.
 		o.quit <- true
@@ -69,7 +67,18 @@ func (o *Observable) Emit(event interface{}) {
 	o.Next(event)
 }
 
-// handleEvent handle an event.
+func (o *Observable) eventLoop() {
+	for {
+		select {
+		case event := <-o.events:
+			o.handleEvent(event)
+		case <-o.quit:
+			return
+		}
+	}
+}
+
+// handleEvent sends an event to all listeners
 func (o *Observable) handleEvent(event interface{}) {
 	o.mutex.Lock()
 	defer o.mutex.Unlock()
@@ -77,21 +86,6 @@ func (o *Observable) handleEvent(event interface{}) {
 	for _, listener := range o.listeners {
 		go listener(event)
 	}
-}
-
-// eventLoop runs the event loop.
-func (o *Observable) eventLoop() {
-	// Run observer.
-	go func() {
-		for {
-			select {
-			case event := <-o.events:
-				o.handleEvent(event, nil)
-			case <-o.quit:
-				return
-			}
-		}
-	}()
 }
 
 // NewObservable creates a new observable
