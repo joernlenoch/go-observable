@@ -66,3 +66,30 @@ func Filter(fn FilterFunc) Middleware {
 		FilterFunc: fn,
 	}
 }
+
+// TakeUntil
+
+type TakeUntilFunc func(data interface{}) bool
+
+type TakeUntilMiddleware struct {
+	delete bool
+}
+
+func (m *TakeUntilMiddleware) Pipe(evt Event) MiddlewareResult {
+	return MiddlewareResult{
+		Abort:       m.delete,
+		Unsubscribe: m.delete,
+	}
+}
+
+func TakeUntil(trigger *Observable) Middleware {
+	m := &TakeUntilMiddleware{}
+
+	// Subscribe to the first event and unsubscribe from
+	// the event as soon as it triggers
+	trigger.Pipe(First()).Subscribe(func(i interface{}) {
+		m.delete = true
+	})
+
+	return m
+}

@@ -91,3 +91,22 @@ func TestMiddlewares(t *testing.T) {
 	obs.Next(10)  // Unsubscribed
 	assert.Equal(t, 1, numCalled, "must unsubscribe after first event")
 }
+
+func TestTakeUntilMiddleware_Pipe(t *testing.T) {
+	obs := &Observable{}
+	numCalled := 0
+	trigger := &Observable{}
+
+	obs.Pipe(
+		TakeUntil(trigger),
+	).Subscribe(func(i interface{}) {
+		numCalled++
+	})
+
+	obs.Next(nil)
+	obs.Next(nil)
+	trigger.Next(nil)
+	obs.Next(nil)
+
+	assert.Equal(t, 2, numCalled, "must unsubscribe when trigger is called")
+}

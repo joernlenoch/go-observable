@@ -54,9 +54,6 @@ func (o *Observable) next(evt Event) {
 
 	for _, middleware := range o.middlewares {
 		result := middleware.Pipe(evt)
-		if result.Abort {
-			return
-		}
 
 		if result.Unsubscribe {
 			evt.Unsubscribe()
@@ -64,6 +61,10 @@ func (o *Observable) next(evt Event) {
 
 		if result.Event != nil {
 			evt = result.Event
+		}
+
+		if result.Abort {
+			return
 		}
 	}
 
