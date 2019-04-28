@@ -1,98 +1,106 @@
 package observable
 
 import (
+	"github.com/labstack/gommon/log"
+	"github.com/rs/xid"
 	"sync"
 )
 
+type EventListener func(Event)
 type Listener func(interface{})
 
-type Observable interface {
-	Subscribe(l Listener)
-	Next(event interface{})
-	Close()
+type Observable struct {
+	middlewares []Middleware
+	listeners   map[string]interface{}
+	mutex       sync.Mutex
 }
 
-type observable struct {
-	quit      chan bool
-	events    chan interface{}
-	listeners []Listener
-	mutex     *sync.Mutex
-	Verbose   bool
+func (o *Observable) Subscribe(l Listener) Subscription {
+	return o.subscribe(l)
 }
 
-func (o *observable) Open() {
-	// Check for mutex
-	if o.mutex == nil {
-		o.mutex = &sync.Mutex{}
+func (o *Observable) SubscribeEvent(l EventListener) Subscription {
+	return o.subscribe(l)
+}
+
+func (o *Observable) subscribe(l interface{}) Subscription {
+	o.mutex.Lock()
+	defer o.mutex.Unlock()
+
+	id := xid.New().String()
+
+	if o.listeners == nil {
+		o.listeners = map[string]interface{}{}
 	}
 
-	if o.events != nil {
-		return
-	}
+	o.listeners[id] = l
 
-	o.quit = make(chan bool)
-	o.events = make(chan interface{})
-
-	// Start the event eventLoop
-	go o.eventLoop()
-}
-
-// Close the observer channles,
-// it will return an error if close fails.
-func (o *observable) Close() {
-	// Close event eventLoop
-	if o.events != nil {
-		// Send a quit signal.
-		o.quit <- true
-
-		// Close channels.
-		close(o.quit)
-		close(o.events)
+	return &subscription{
+		obs: o,
+		id:  id,
 	}
 }
 
-func (o *observable) Subscribe(l Listener) {
+func (o *Observable) Next(evt interface{}) {
+	o.next(&event{
+		data: evt,
+	})
+}
 
-	if o.mutex == nil {
-		o.mutex = &sync.Mutex{}
-	}
+func (o *Observable) next(evt Event) {
 
 	o.mutex.Lock()
 	defer o.mutex.Unlock()
 
-	o.listeners = append(o.listeners, l)
-}
-
-func (o *observable) Next(event interface{}) {
-	o.events <- event
-}
-
-func (o *observable) eventLoop() {
-	for {
-		select {
-		case event := <-o.events:
-			o.handleEvent(event)
-		case <-o.quit:
+	for _, middleware := range o.middlewares {
+		result := middleware.Pipe(evt)
+		if result.Abort {
 			return
+		}
+
+		if result.Unsubscribe {
+			evt.Unsubscribe()
+		}
+
+		if result.Event != nil {
+			evt = result.Event
+		}
+	}
+
+	for subID, listener := range o.listeners {
+		switch fn := listener.(type) {
+		case Listener:
+			fn(evt.Data())
+		case EventListener:
+			fn(evt.withSubscription(&subscription{
+				id:  subID,
+				obs: o,
+			}))
+		default:
+			log.Errorf("unknown callback type: %v", listener)
 		}
 	}
 }
 
-// handleEvent sends an event to all listeners
-func (o *observable) handleEvent(event interface{}) {
-	o.mutex.Lock()
-	defer o.mutex.Unlock()
-
-	for _, listener := range o.listeners {
-		go listener(event)
+func (o *Observable) Pipe(middlewares ...Middleware) *Observable {
+	next := &Observable{
+		middlewares: middlewares,
 	}
+
+	// Add the current observable as source
+	o.SubscribeEvent(func(evt Event) {
+		next.next(evt)
+	})
+
+	return next
 }
 
-var _ Observable = (*observable)(nil)
+func (o *Observable) unsubscribe(id string) {
+	// o.mutex.Lock()
+	// defer o.mutex.Unlock()
+	delete(o.listeners, id)
+}
 
-// NewObservable creates a new observable
-func New() Observable {
-	obs := &observable{}
-	obs.Open()
-	return obs
+func (o *Observable) Complete() {
+	o.listeners = nil
 }
